@@ -1,0 +1,10 @@
+{
+  "files": [],
+  "references": [
+    { "path": "src/shared-kernel" },
+    { "path": "src/domain" },
+    { "path": "src/application" },
+    { "path": "src/infrastructure" },
+    { "path": "src/api" }
+  ]
+}

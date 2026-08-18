@@ -1,0 +1,7 @@
+model ProcessedRequest {
+  id          String   @id
+  name        String
+  processedOn DateTime
+
+  @@map("processed_requests")
+}

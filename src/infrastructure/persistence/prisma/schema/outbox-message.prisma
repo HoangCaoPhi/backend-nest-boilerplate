@@ -1,0 +1,13 @@
+model OutboxMessage {
+  id            String    @id
+  type          String
+  content       String
+  occurredOn    DateTime
+  processedOn   DateTime?
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime?
+  error         String?
+
+  @@index([processedOn, nextAttemptAt, occurredOn])
+  @@map("outbox_messages")
+}

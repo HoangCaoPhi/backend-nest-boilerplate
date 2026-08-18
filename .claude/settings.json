@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo '{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"Ask yourself first: do you already remember this repo layer-first/DDD NestJS conventions (see CLAUDE.md)? If you do (e.g. resuming a recent session and still recall them), skip this - do NOT re-read. If unsure, or this is a fresh context, read .claude/rules/*.md (architecture.md, ddd.md, code-style.md, doc-style.md) before doing anything else.\"}}'"
+          }
+        ]
+      }
+    ]
+  }
+}

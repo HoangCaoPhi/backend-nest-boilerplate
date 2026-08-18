@@ -1,0 +1,10 @@
+import { UuidV7IdGenerator } from '@shared-kernel/id-generator/uuid-v7-id-generator';
+import { SystemTimeProvider } from '@shared-kernel/time-provider/system-time-provider';
+
+export abstract class Command {
+  readonly id: string = new UuidV7IdGenerator().generate();
+  readonly occurredAt: Date = new SystemTimeProvider().now();
+  readonly correlationId?: string;
+  readonly causationId?: string;
+  readonly userId?: string;
+}

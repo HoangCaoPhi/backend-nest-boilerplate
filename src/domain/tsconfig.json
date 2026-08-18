@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "../../dist/domain"
+  },
+  "include": ["**/*.ts"],
+  "references": [
+    {
+      "path": "../shared-kernel"
+    }
+  ],
+  "exclude": ["**/*.spec.ts"]
+}

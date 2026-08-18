@@ -1,0 +1,10 @@
+model TodoItem {
+  id         String   @id
+  title      String
+  isDone     Boolean  @default(false)
+  priority   String
+  todoListId String
+  todoList   TodoList @relation(fields: [todoListId], references: [id])
+
+  @@map("todo_items")
+}

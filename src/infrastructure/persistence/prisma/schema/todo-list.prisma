@@ -1,0 +1,8 @@
+model TodoList {
+  id         String     @id
+  title      String
+  colourCode String
+  items      TodoItem[]
+
+  @@map("todo_lists")
+}

@@ -1,0 +1,4 @@
+dist
+node_modules
+src/infrastructure/persistence/prisma/schema/generated
+temp
