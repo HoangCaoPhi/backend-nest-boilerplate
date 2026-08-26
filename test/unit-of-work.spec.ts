@@ -1,8 +1,5 @@
-import { EventBus } from '@nestjs/cqrs';
 import { TestingModule } from '@nestjs/testing';
-import { DomainEvent } from '@domain/common/domain-event.interface';
 import { Colour } from '@domain/todo-lists/colour.value-object';
-import { TodoItemCompletedDomainEvent } from '@domain/todo-lists/events/todo-item-completed.domain-event';
 import { PriorityLevel } from '@domain/todo-lists/priority-level.enum';
 import { TodoItem } from '@domain/todo-lists/todo-item.entity';
 import { TodoList } from '@domain/todo-lists/todo-list.entity';
@@ -11,12 +8,13 @@ import { TODO_LIST_REPOSITORY } from '@domain/todo-lists/todo-list.di-tokens';
 import { PrismaClientExtended } from '@infrastructure/persistence/prisma/prisma-client.factory';
 import { PRISMA_CLIENT } from '@infrastructure/persistence/prisma/prisma.di-tokens';
 import { createTestModule } from './create-test-module';
+import { FailingDomainEventHandler } from './failing-domain-event-handler';
 
 describe('Unit of work (AggregateRepositoryBase)', () => {
   let moduleRef: TestingModule;
   let repository: TodoListRepository;
   let prisma: PrismaClientExtended;
-  let publishedEvents: DomainEvent[];
+  let failingHandler: FailingDomainEventHandler;
 
   const newList = (title = 'Groceries') => TodoList.create(crypto.randomUUID(), title, Colour.create('#FF0000'));
 
@@ -26,12 +24,11 @@ describe('Unit of work (AggregateRepositoryBase)', () => {
 
     repository = moduleRef.get<TodoListRepository>(TODO_LIST_REPOSITORY);
     prisma = moduleRef.get<PrismaClientExtended>(PRISMA_CLIENT);
-
-    moduleRef.get(EventBus).subscribe((event: DomainEvent) => publishedEvents.push(event));
+    failingHandler = moduleRef.get(FailingDomainEventHandler);
   });
 
   beforeEach(async () => {
-    publishedEvents = [];
+    failingHandler.failWith = null;
     await prisma.outboxMessage.deleteMany();
     await prisma.todoItem.deleteMany();
     await prisma.todoList.deleteMany();
@@ -123,7 +120,7 @@ describe('Unit of work (AggregateRepositoryBase)', () => {
       expect(message.processedOn).toBeNull();
     });
 
-    it('publishes the domain event in-process for best-effort handlers', async () => {
+    it('rolls the write back when a handler throws', async () => {
       const todoList = newList();
       const item = TodoItem.create(crypto.randomUUID(), 'Bread');
       todoList.addItem(item);
@@ -131,10 +128,13 @@ describe('Unit of work (AggregateRepositoryBase)', () => {
 
       const loaded = (await repository.getById(todoList.id))!;
       loaded.completeItem(item.id);
-      await repository.update(loaded);
+      failingHandler.failWith = new Error('handler blew up');
 
-      expect(publishedEvents).toHaveLength(1);
-      expect(publishedEvents[0]).toBeInstanceOf(TodoItemCompletedDomainEvent);
+      await expect(repository.update(loaded)).rejects.toThrow('handler blew up');
+
+      const storedItem = await prisma.todoItem.findUnique({ where: { id: item.id } });
+      expect(storedItem!.isDone).toBe(false);
+      expect(await prisma.outboxMessage.count()).toBe(0);
     });
 
     it('drains the aggregate so a second save cannot republish the same event', async () => {
@@ -149,7 +149,6 @@ describe('Unit of work (AggregateRepositoryBase)', () => {
       await repository.update(loaded);
 
       expect(await prisma.outboxMessage.count()).toBe(1);
-      expect(publishedEvents).toHaveLength(1);
     });
 
     it('removes items the aggregate no longer holds', async () => {
@@ -199,16 +198,7 @@ describe('Unit of work (AggregateRepositoryBase)', () => {
 
       await expect(repository.add(duplicate)).rejects.toThrow();
 
-      expect(duplicate.domainEvents).toHaveLength(1);
-    });
-
-    it('publishes nothing in-process for a write that never committed', async () => {
-      const existing = newList();
-      await repository.add(existing);
-
-      await expect(repository.add(conflictingWith(existing.id))).rejects.toThrow();
-
-      expect(publishedEvents).toHaveLength(0);
+      expect(duplicate.getUncommittedEvents()).toHaveLength(1);
     });
   });
 

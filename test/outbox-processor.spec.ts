@@ -1,10 +1,13 @@
 import { ConfigModule } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
-import { SharedKernelModule } from '@infrastructure/common/shared-kernel.module';
-import { IntegrationEventPublisher } from '@infrastructure/outbox/integration-event-publisher.interface';
-import { INTEGRATION_EVENT_PUBLISHER } from '@infrastructure/outbox/outbox.di-tokens';
-import { OutboxProcessor } from '@infrastructure/outbox/outbox.processor';
-import databaseConfig from '@infrastructure/persistence/prisma/database.config';
+import { ClsModule } from 'nestjs-cls';
+import { ClsPluginTransactional } from '@nestjs-cls/transactional';
+import { TransactionalAdapterPrisma } from '@nestjs-cls/transactional-adapter-prisma';
+import { SharedKernelModule } from '@shared-kernel/shared-kernel.module';
+import { IntegrationEventPublisher } from '@infrastructure/integration-event/integration-event-publisher.interface';
+import { INTEGRATION_EVENT_PUBLISHER } from '@infrastructure/integration-event/integration-event.di-tokens';
+import { OutboxProcessor } from '@infrastructure/outbox/outbox-processor';
+import { InfrastructureModule } from '@infrastructure/infrastructure.module';
 import { PrismaClientExtended } from '@infrastructure/persistence/prisma/prisma-client.factory';
 import { PrismaModule } from '@infrastructure/persistence/prisma/prisma.module';
 import { PRISMA_CLIENT } from '@infrastructure/persistence/prisma/prisma.di-tokens';
@@ -12,8 +15,10 @@ import { PRISMA_CLIENT } from '@infrastructure/persistence/prisma/prisma.di-toke
 class FakePublisher implements IntegrationEventPublisher {
   readonly published: { eventType: string; content: string }[] = [];
   failWith: Error | null = null;
+  beforePublish: (() => Promise<void>) | null = null;
 
   async publish(eventType: string, content: string): Promise<void> {
+    await this.beforePublish?.();
     if (this.failWith) {
       throw this.failWith;
     }
@@ -21,21 +26,48 @@ class FakePublisher implements IntegrationEventPublisher {
   }
 }
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
 describe('OutboxProcessor', () => {
   let moduleRef: TestingModule;
   let processor: OutboxProcessor;
   let prisma: PrismaClientExtended;
-  let publisher: FakePublisher;
+  const publisher = new FakePublisher();
 
-  const seed = (id: string, occurredOn: Date, type = 'TodoItemCompleted') =>
+  const seed = (id: string, overrides: Record<string, unknown> = {}) =>
     prisma.outboxMessage.create({
-      data: { id, type, content: JSON.stringify({ name: type, id }), occurredOn },
+      data: {
+        id,
+        type: 'TodoItemCompletedIntegrationEvent',
+        content: JSON.stringify({ todoItemId: id }),
+        occurredOn: new Date(),
+        ...overrides,
+      },
     });
 
   beforeAll(async () => {
-    publisher = new FakePublisher();
     moduleRef = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true, load: [databaseConfig] }), SharedKernelModule, PrismaModule],
+      imports: [
+        ConfigModule.forRoot({ isGlobal: true }),
+        InfrastructureModule,
+        SharedKernelModule,
+        PrismaModule,
+        ClsModule.forRoot({
+          global: true,
+          plugins: [
+            new ClsPluginTransactional({
+              adapter: new TransactionalAdapterPrisma<PrismaClientExtended>({
+                prismaInjectionToken: PRISMA_CLIENT,
+              }),
+              enableTransactionProxy: true,
+            }),
+          ],
+        }),
+      ],
       providers: [OutboxProcessor, { provide: INTEGRATION_EVENT_PUBLISHER, useValue: publisher }],
     }).compile();
     await moduleRef.init();
@@ -47,133 +79,129 @@ describe('OutboxProcessor', () => {
   beforeEach(async () => {
     publisher.published.length = 0;
     publisher.failWith = null;
+    publisher.beforePublish = null;
     await prisma.outboxMessage.deleteMany();
   });
 
   afterAll(async () => {
+    await prisma.outboxMessage.deleteMany();
     await moduleRef.close();
   });
 
-  it('publishes pending messages and marks them processed', async () => {
-    await seed('ob-1', new Date());
+  it('publishes a pending message and marks it processed', async () => {
+    await seed('ob-1');
 
     await processor.process();
 
-    expect(publisher.published).toHaveLength(1);
-    expect(publisher.published[0].eventType).toBe('TodoItemCompleted');
-    const [message] = await prisma.outboxMessage.findMany();
-    expect(message.processedOn).not.toBeNull();
-    expect(message.error).toBeNull();
+    expect(publisher.published).toEqual([
+      { eventType: 'TodoItemCompletedIntegrationEvent', content: JSON.stringify({ todoItemId: 'ob-1' }) },
+    ]);
+    const [row] = await prisma.outboxMessage.findMany();
+    expect(row.processedOn).not.toBeNull();
+    expect(row.error).toBeNull();
   });
 
   it('publishes oldest first', async () => {
-    await seed('ob-new', new Date('2026-01-02T00:00:00Z'), 'Second');
-    await seed('ob-old', new Date('2026-01-01T00:00:00Z'), 'First');
+    await seed('ob-late', { occurredOn: new Date('2026-02-01') });
+    await seed('ob-early', { occurredOn: new Date('2026-01-01') });
 
     await processor.process();
 
-    expect(publisher.published.map((message) => message.eventType)).toEqual(['First', 'Second']);
+    expect(publisher.published.map((message) => JSON.parse(message.content).todoItemId)).toEqual([
+      'ob-early',
+      'ob-late',
+    ]);
   });
 
-  it('leaves a failed message unprocessed and records why', async () => {
-    await seed('ob-1', new Date());
-    publisher.failWith = new Error('broker unreachable');
+  it('leaves an already processed message alone', async () => {
+    await seed('ob-done', { processedOn: new Date() });
 
     await processor.process();
 
-    const [message] = await prisma.outboxMessage.findMany();
-    expect(message.processedOn).toBeNull();
-    expect(message.error).toBe('broker unreachable');
+    expect(publisher.published).toHaveLength(0);
   });
 
-  it('retries a previously failed message on the next cycle', async () => {
-    await seed('ob-1', new Date());
-    publisher.failWith = new Error('broker unreachable');
-    await processor.process();
-
-    publisher.failWith = null;
-    await processor.process();
-
-    expect(publisher.published).toHaveLength(1);
-    const [message] = await prisma.outboxMessage.findMany();
-    expect(message.processedOn).not.toBeNull();
-  });
-
-  it('never republishes an already processed message', async () => {
-    await seed('ob-1', new Date());
-    await processor.process();
-
-    await processor.process();
-
-    expect(publisher.published).toHaveLength(1);
-  });
-
-  it('survives a broker outage without throwing out of the timer callback', async () => {
-    await seed('ob-1', new Date());
-    publisher.failWith = new Error('broker unreachable');
-
-    await expect(processor.process()).resolves.toBeUndefined();
-  });
-
-  describe('retry policy', () => {
-    it('counts an attempt and schedules the next one in the future', async () => {
-      await seed('ob-1', new Date());
+  describe('when publishing fails', () => {
+    it('records the reason and keeps the message pending', async () => {
+      await seed('ob-fail');
       publisher.failWith = new Error('broker unreachable');
 
       await processor.process();
 
-      const [message] = await prisma.outboxMessage.findMany();
-      expect(message.attempts).toBe(1);
-      expect(message.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+      const [row] = await prisma.outboxMessage.findMany();
+      expect(row.processedOn).toBeNull();
+      expect(row.error).toBe('broker unreachable');
     });
 
-    it('does not retry before the backoff deadline', async () => {
-      // Start from a high attempt count so the backoff is tens of seconds — long
-      // enough that this assertion cannot depend on how fast the test runs.
-      await prisma.outboxMessage.create({
-        data: { id: 'ob-1', type: 'TodoItemCompleted', content: '{}', occurredOn: new Date(), attempts: 5 },
-      });
+    it('counts the attempt and pushes the next one into the future', async () => {
+      await seed('ob-fail');
       publisher.failWith = new Error('broker unreachable');
+
       await processor.process();
 
-      publisher.failWith = null;
-      await processor.process();
-
-      expect(publisher.published).toHaveLength(0);
+      const [row] = await prisma.outboxMessage.findMany();
+      expect(row.attempts).toBe(1);
+      expect(row.nextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
     });
 
-    it('gives up after the attempt limit and leaves a dead letter behind', async () => {
-      await prisma.outboxMessage.create({
-        data: {
-          id: 'ob-dead',
-          type: 'TodoItemCompleted',
-          content: '{}',
-          occurredOn: new Date(),
-          attempts: 8,
-          error: 'broker unreachable',
-        },
-      });
+    it('does not throw out of the cycle, so the timer survives', async () => {
+      await seed('ob-fail');
+      publisher.failWith = new Error('broker unreachable');
+
+      await expect(processor.process()).resolves.toBeUndefined();
+    });
+
+    it('publishes the message once its backoff has passed', async () => {
+      await seed('ob-retry', { attempts: 1, nextAttemptAt: new Date(Date.now() - 1000) });
 
       await processor.process();
 
-      expect(publisher.published).toHaveLength(0);
-      const [message] = await prisma.outboxMessage.findMany();
-      expect(message.processedOn).toBeNull();
-      expect(message.error).toBe('broker unreachable');
+      expect(publisher.published).toHaveLength(1);
+      const [row] = await prisma.outboxMessage.findMany();
+      expect(row.processedOn).not.toBeNull();
     });
   });
 
-  describe('multiple replicas', () => {
-    it('never hands the same message to two concurrent cycles', async () => {
-      for (let index = 0; index < 10; index += 1) {
-        await seed(`ob-${index}`, new Date(Date.now() + index));
-      }
+  it('skips a message that is still backing off', async () => {
+    await seed('ob-waiting', { attempts: 1, nextAttemptAt: new Date(Date.now() + 60_000) });
 
-      await Promise.all([processor.process(), processor.process(), processor.process()]);
+    await processor.process();
 
-      const publishedIds = publisher.published.map((message) => message.content);
-      expect(new Set(publishedIds).size).toBe(publishedIds.length);
-      expect(await prisma.outboxMessage.count({ where: { processedOn: null } })).toBe(0);
-    });
+    expect(publisher.published).toHaveLength(0);
+  });
+
+  // Past the attempt ceiling a message stops being selected and stays as a dead letter.
+  it('gives up on a message that exhausted its attempts', async () => {
+    await seed('ob-dead', { attempts: 8, error: 'broker unreachable' });
+
+    await processor.process();
+
+    expect(publisher.published).toHaveLength(0);
+    const [row] = await prisma.outboxMessage.findMany();
+    expect(row.attempts).toBe(8);
+    expect(row.processedOn).toBeNull();
+  });
+
+  // The row lock is the lease. The wait matters: an implementation that claims with an
+  // autocommitted UPDATE and relies on a retry delay instead of a lock hands the message to
+  // the second cycle as soon as that delay passes, and publishes it twice.
+  it('skips a message another cycle is still publishing', async () => {
+    await seed('ob-inflight');
+    const started = deferred();
+    const blocked = deferred();
+    publisher.beforePublish = async () => {
+      started.resolve();
+      await blocked.promise;
+    };
+
+    const firstCycle = processor.process();
+    await started.promise;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await processor.process();
+
+    blocked.resolve();
+    await firstCycle;
+
+    expect(publisher.published).toHaveLength(1);
   });
 });

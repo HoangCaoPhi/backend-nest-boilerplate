@@ -1,4 +1,4 @@
-import { Query } from '../../../common/query.base';
+import { Query } from '../../../common/message/query.base';
 
 export class GetTodoListsQuery extends Query {
   constructor(

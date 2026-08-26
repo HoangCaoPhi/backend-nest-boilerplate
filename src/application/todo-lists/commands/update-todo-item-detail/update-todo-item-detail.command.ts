@@ -1,5 +1,5 @@
 import { PriorityLevel } from '@domain/todo-lists/priority-level.enum';
-import { Command } from '../../../common/command.base';
+import { Command } from '../../../common/message/command.base';
 
 export class UpdateTodoItemDetailCommand extends Command {
   constructor(

@@ -29,6 +29,10 @@ export class Result<T = void> {
     return this.error as AppError;
   }
 
+  map<U>(project: (value: T) => U): Result<U> {
+    return this.isFailure ? Result.fail<U>(this.error as AppError) : Result.ok(project(this.value as T));
+  }
+
   static ok<T = void>(value?: T): Result<T> {
     return new Result<T>(true, value, undefined);
   }

@@ -31,7 +31,7 @@ describe('TodoList', () => {
       todoList.completeItem('item-1');
 
       expect(todoList.items[0].isDone).toBe(true);
-      const events = todoList.pullDomainEvents();
+      const events = todoList.getUncommittedEvents();
       expect(events).toHaveLength(1);
       expect(events[0]).toBeInstanceOf(TodoItemCompletedDomainEvent);
       expect(events[0]).toMatchObject({ todoListId: 'list-1', todoItemId: 'item-1' });
@@ -41,13 +41,14 @@ describe('TodoList', () => {
       expect(() => newList().completeItem('ghost')).toThrow();
     });
 
-    it('drains events once pulled', () => {
+    it('holds the event until it is cleared', () => {
       const todoList = newList();
       todoList.addItem(TodoItem.create('item-1', 'Bread'));
       todoList.completeItem('item-1');
 
-      expect(todoList.pullDomainEvents()).toHaveLength(1);
-      expect(todoList.pullDomainEvents()).toHaveLength(0);
+      expect(todoList.getUncommittedEvents()).toHaveLength(1);
+      todoList.clearUncommittedEvents();
+      expect(todoList.getUncommittedEvents()).toHaveLength(0);
     });
   });
 
@@ -60,7 +61,7 @@ describe('TodoList', () => {
 
       expect(todoList.items[0].title).toBe('Sourdough');
       expect(todoList.items[0].priority).toBe(PriorityLevel.High);
-      expect(todoList.pullDomainEvents()).toHaveLength(0);
+      expect(todoList.getUncommittedEvents()).toHaveLength(0);
     });
 
     it('rejects an empty title', () => {
@@ -78,7 +79,7 @@ describe('TodoList', () => {
       ]);
 
       expect(todoList.items[0].isDone).toBe(true);
-      expect(todoList.pullDomainEvents()).toHaveLength(0);
+      expect(todoList.getUncommittedEvents()).toHaveLength(0);
     });
   });
 });

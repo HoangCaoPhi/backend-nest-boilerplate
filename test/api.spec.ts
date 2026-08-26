@@ -4,8 +4,11 @@ import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '@api/app.module';
-import { IntegrationEventPublisher } from '@infrastructure/outbox/integration-event-publisher.interface';
-import { INTEGRATION_EVENT_PUBLISHER, RABBITMQ_CONNECTION } from '@infrastructure/outbox/outbox.di-tokens';
+import { IntegrationEventPublisher } from '@infrastructure/integration-event/integration-event-publisher.interface';
+import {
+  INTEGRATION_EVENT_PUBLISHER,
+  RABBITMQ_CONNECTION,
+} from '@infrastructure/integration-event/integration-event.di-tokens';
 import { PrismaClientExtended } from '@infrastructure/persistence/prisma/prisma-client.factory';
 import { PRISMA_CLIENT } from '@infrastructure/persistence/prisma/prisma.di-tokens';
 
@@ -71,7 +74,10 @@ describe('API (e2e)', () => {
 
   describe('auth categories', () => {
     it('serves public routes without credentials', async () => {
-      await request(http).get('/health').expect(200, { status: 'ok' });
+      const response = await request(http).get('/health').expect(200);
+
+      expect(response.body).toMatchObject({ status: 'ok' });
+      expect(response.body.requestId).toEqual(expect.any(String));
     });
 
     it('rejects app routes without a token', async () => {
@@ -123,7 +129,7 @@ describe('API (e2e)', () => {
         .send({ title: 'Bread' })
         .expect(404);
 
-      expect(response.body).toMatchObject({ title: 'TodoList.NotFound', status: 404 });
+      expect(response.body).toMatchObject({ title: 'Not Found', code: 'TodoList.NotFound', status: 404 });
     });
   });
 
@@ -148,7 +154,7 @@ describe('API (e2e)', () => {
       await send().expect(201);
       const replay = await send().expect(409);
 
-      expect(replay.body.title).toBe('Idempotency.DuplicateRequest');
+      expect(replay.body.code).toBe('Idempotency.DuplicateRequest');
       expect(await prisma.todoList.count()).toBe(1);
     });
 

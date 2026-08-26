@@ -17,7 +17,7 @@ paths:
 - Length: ~30-40 lines per method, ~200-300 lines per class, and watch the parameter count (>4-5 →
   split it up or use a pattern).
 - Comments: short, one line where possible, written only when the code cannot speak for itself — a
-  non-obvious *why*, a gotcha, a `ponytail:`/`TODO` marker. Never restate what the code does, never
+  non-obvious _why_, a gotcha, a `ponytail:`/`TODO` marker. Never restate what the code does, never
   record architectural rationale or decisions already settled in chat, never leave
   template-generated comments behind. No JSDoc unless the package is genuinely published or
   consumed externally.

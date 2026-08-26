@@ -1,1 +1,1 @@
-export const OUTBOX_PAYLOAD_SOURCE = Symbol('OutboxPayloadSource');
+export const INTEGRATION_EVENT_OUTBOX = Symbol('IntegrationEventOutbox');

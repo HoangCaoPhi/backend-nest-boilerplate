@@ -1,16 +1,16 @@
 import { Global, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
-import { ConfigType } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AuthGuard } from './auth.guard';
 import { IntegrationAuthenticator } from './integration-authenticator';
-import jwtConfig from './jwt.config';
+import { JwtConfig, jwtConfigProvider } from './jwt.config';
+import { integrationConfigProvider } from './integration.config';
 
 @Global()
 @Module({
   imports: [
     JwtModule.registerAsync({
-      useFactory: (config: ConfigType<typeof jwtConfig>) => ({
+      useFactory: (config: JwtConfig) => ({
         secret: config.secret,
         signOptions: {
           issuer: config.issuer,
@@ -18,10 +18,15 @@ import jwtConfig from './jwt.config';
           expiresIn: config.expiresIn,
         },
       }),
-      inject: [jwtConfig.KEY],
+      inject: [JwtConfig],
     }),
   ],
-  providers: [IntegrationAuthenticator, { provide: APP_GUARD, useClass: AuthGuard }],
-  exports: [JwtModule],
+  providers: [
+    jwtConfigProvider,
+    integrationConfigProvider,
+    IntegrationAuthenticator,
+    { provide: APP_GUARD, useClass: AuthGuard },
+  ],
+  exports: [JwtModule, JwtConfig],
 })
 export class AuthModule {}

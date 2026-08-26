@@ -1,4 +1,4 @@
-import { IntegrationEvent } from '../../common/event-bus/integration-event.interface';
+import { IntegrationEvent } from '../../common/integration-event/integration-event.interface';
 
 export class TodoItemCompletedIntegrationEvent implements IntegrationEvent {
   readonly occurredOn: Date;

@@ -1,29 +1,22 @@
 import { Inject } from '@nestjs/common';
-import { EventBus } from '@nestjs/cqrs';
 import { Transaction, TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterPrisma } from '@nestjs-cls/transactional-adapter-prisma';
 import { AggregateRoot } from '@domain/common/aggregate-root.base';
 import { Repository } from '@domain/common/repository.interface';
-import { OutboxPayloadSource } from '@application/common/outbox/outbox-payload-source.interface';
-import { OUTBOX_PAYLOAD_SOURCE } from '@application/common/outbox/outbox.di-tokens';
-import { OutboxWriter } from '../../outbox/outbox-writer';
+import { DomainEventDispatcher } from '../../domain-event/domain-event-dispatcher';
 import { PrismaClientExtended } from './prisma-client.factory';
 
 export type PrismaAdapter = TransactionalAdapterPrisma<PrismaClientExtended>;
 export type PrismaContext = Transaction<PrismaAdapter>;
 
+// Property injection, not constructor: every concrete repository would otherwise have to
+// declare a constructor purely to forward these along.
 export abstract class AggregateRepositoryBase<T extends AggregateRoot<unknown>> implements Repository<T> {
   @Inject()
   private readonly txHost!: TransactionHost<PrismaAdapter>;
 
   @Inject()
-  private readonly eventBus!: EventBus;
-
-  @Inject()
-  private readonly outboxWriter!: OutboxWriter;
-
-  @Inject(OUTBOX_PAYLOAD_SOURCE)
-  private readonly outboxPayloads!: OutboxPayloadSource;
+  private readonly dispatcher!: DomainEventDispatcher;
 
   protected abstract find(db: PrismaContext, id: string): Promise<T | null>;
   protected abstract insert(db: PrismaContext, aggregate: T): Promise<void>;
@@ -47,20 +40,19 @@ export abstract class AggregateRepositoryBase<T extends AggregateRoot<unknown>> 
   }
 
   private async commit(aggregate: T, write: (db: PrismaContext) => Promise<void>): Promise<void> {
-    // Read without draining: if this transaction rolls back, the caller can retry
-    // the same aggregate instance and its events are still there.
-    const events = [...aggregate.domainEvents];
-
     await this.txHost.withTransaction(async () => {
       await write(this.txHost.tx);
-      // Outbox row rides this transaction — it commits with the write or not at all.
-      await this.outboxWriter.enqueue(this.txHost.tx, this.outboxPayloads.toOutboxPayloads(events));
-    });
 
-    // Past this line the transaction is committed, so in-process handlers can never
-    // observe a write that was rolled back. They stay best-effort: @nestjs/cqrs
-    // cannot await them, and a handler failure must not undo a committed write.
-    aggregate.pullDomainEvents();
-    this.eventBus.publishAll(events);
+      const events = aggregate.getUncommittedEvents();
+      aggregate.clearUncommittedEvents();
+      await this.dispatcher.dispatch(events);
+
+      if (aggregate.hasUncommittedEvents) {
+        throw new Error(
+          `A handler mutated ${aggregate.constructor.name} ${String(aggregate.id)} after it had been written, ` +
+            'so that change was never persisted.',
+        );
+      }
+    });
   }
 }
