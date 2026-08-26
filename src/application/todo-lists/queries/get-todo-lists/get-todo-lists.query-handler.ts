@@ -1,5 +1,6 @@
 import { Inject } from '@nestjs/common';
 import { IQueryHandler, QueryHandler } from '@nestjs/cqrs';
+import { Result } from '@shared-kernel/result/result';
 import { ReadDb } from '../../../common/data/read-db.interface';
 import { READ_DB } from '../../../common/data/read-db.di-tokens';
 import { paginate, PaginatableDelegate } from '../../../common/data/pagination';
@@ -8,13 +9,13 @@ import { GetTodoListsResponse } from './get-todo-lists.query.response';
 import { TodoListRecord } from './get-todo-lists.query.record';
 
 @QueryHandler(GetTodoListsQuery)
-export class GetTodoListsQueryHandler implements IQueryHandler<GetTodoListsQuery, GetTodoListsResponse> {
+export class GetTodoListsQueryHandler implements IQueryHandler<GetTodoListsQuery, Result<GetTodoListsResponse>> {
   constructor(
     @Inject(READ_DB)
     private readonly readDb: ReadDb,
   ) {}
 
-  async execute(query: GetTodoListsQuery): Promise<GetTodoListsResponse> {
+  async execute(query: GetTodoListsQuery): Promise<Result<GetTodoListsResponse>> {
     const { items, meta } = await paginate<TodoListRecord>(
       this.readDb.todoList as PaginatableDelegate<TodoListRecord>,
       {
@@ -30,7 +31,7 @@ export class GetTodoListsQueryHandler implements IQueryHandler<GetTodoListsQuery
       { page: query.page, pageSize: query.pageSize },
     );
 
-    return {
+    return Result.ok({
       items: items.map((record) => ({
         id: record.id,
         title: record.title,
@@ -38,6 +39,6 @@ export class GetTodoListsQueryHandler implements IQueryHandler<GetTodoListsQuery
         incompleteItemCount: record.items.filter((item) => !item.isDone).length,
       })),
       meta,
-    };
+    });
   }
 }

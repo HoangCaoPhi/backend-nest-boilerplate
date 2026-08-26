@@ -1,37 +1,34 @@
-import { registerAs } from '@nestjs/config';
+import { Provider } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { JwtSignOptions } from '@nestjs/jwt';
-import { plainToInstance } from 'class-transformer';
-import { IsNotEmpty, IsString, validateSync } from 'class-validator';
+import { IsNotEmpty, IsString } from 'class-validator';
+import { validatedConfig } from '@infrastructure/config/validated-config';
 
-class JwtEnvironmentVariables {
+export class JwtConfig {
   @IsString()
   @IsNotEmpty()
-  JWT_SECRET!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  JWT_ISSUER!: string;
+  readonly secret!: string;
 
   @IsString()
   @IsNotEmpty()
-  JWT_AUDIENCE!: string;
+  readonly issuer!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  readonly audience!: string;
+
+  // Env vars are strings; jsonwebtoken narrows this to its own duration union.
+  readonly expiresIn!: JwtSignOptions['expiresIn'];
 }
 
-export default registerAs('jwt', () => {
-  const validated = plainToInstance(JwtEnvironmentVariables, {
-    JWT_SECRET: process.env.JWT_SECRET,
-    JWT_ISSUER: process.env.JWT_ISSUER,
-    JWT_AUDIENCE: process.env.JWT_AUDIENCE,
-  });
-  const errors = validateSync(validated, { skipMissingProperties: false });
-  if (errors.length > 0) {
-    throw new Error(errors.toString());
-  }
-  return {
-    secret: validated.JWT_SECRET,
-    issuer: validated.JWT_ISSUER,
-    audience: validated.JWT_AUDIENCE,
-    // Env vars are strings; jsonwebtoken narrows this to its own duration union.
-    expiresIn: (process.env.JWT_EXPIRES_IN ?? '1h') as JwtSignOptions['expiresIn'],
-  };
-});
+export const jwtConfigProvider: Provider = {
+  provide: JwtConfig,
+  useFactory: (config: ConfigService) =>
+    validatedConfig(JwtConfig, {
+      secret: config.get('JWT_SECRET'),
+      issuer: config.get('JWT_ISSUER'),
+      audience: config.get('JWT_AUDIENCE'),
+      expiresIn: config.get('JWT_EXPIRES_IN') ?? '1h',
+    }),
+  inject: [ConfigService],
+};

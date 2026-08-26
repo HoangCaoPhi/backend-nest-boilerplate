@@ -1,14 +1,10 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
-import { ConfigType } from '@nestjs/config';
-import integrationConfig from './integration.config';
+import { Injectable } from '@nestjs/common';
+import { IntegrationConfig } from './integration.config';
 
 @Injectable()
 export class IntegrationAuthenticator {
-  constructor(
-    @Inject(integrationConfig.KEY)
-    private readonly config: ConfigType<typeof integrationConfig>,
-  ) {}
+  constructor(private readonly config: IntegrationConfig) {}
 
   // X-Client-Id is always required; when the caller has a secret configured, also
   // X-Token = HMAC-SHA256(clientSecret, X-Timestamp) within the replay window.

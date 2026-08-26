@@ -1,4 +1,4 @@
-import { Command } from '../../../common/command.base';
+import { Command } from '../../../common/message/command.base';
 
 export class CompleteTodoItemCommand extends Command {
   constructor(

@@ -1,30 +1,32 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { OutboxPayload } from '@application/common/outbox/outbox-payload.interface';
+import { TransactionHost } from '@nestjs-cls/transactional';
+import { IntegrationEvent } from '@application/common/integration-event/integration-event.interface';
+import { IntegrationEventOutbox } from '@application/common/outbox/integration-event-outbox.interface';
 import { IdGenerator } from '@shared-kernel/id-generator/id-generator.interface';
 import { ID_GENERATOR } from '@shared-kernel/id-generator/id-generator.di-tokens';
-import { PrismaContext } from '../persistence/prisma/aggregate-repository.base';
+import { PrismaAdapter } from '../persistence/prisma/aggregate-repository.base';
 
-// Rides the caller's open transaction — never opens or commits one itself.
 @Injectable()
-export class OutboxWriter {
+export class OutboxWriter implements IntegrationEventOutbox {
   constructor(
+    private readonly txHost: TransactionHost<PrismaAdapter>,
     @Inject(ID_GENERATOR)
     private readonly idGenerator: IdGenerator,
   ) {}
 
-  async enqueue(db: PrismaContext, payloads: readonly OutboxPayload[]): Promise<void> {
-    if (payloads.length === 0) {
+  async enqueue(events: readonly IntegrationEvent[]): Promise<void> {
+    if (events.length === 0) {
       return;
     }
 
-    await db.outboxMessage.createMany({
-      data: payloads.map((payload) => ({
+    await this.txHost.tx.outboxMessage.createMany({
+      data: events.map((event) => ({
         id: this.idGenerator.generate(),
-        // Wire type name comes from the class itself (mirrors .NET's GetType().Name) — safe only
-        // because the production build is plain tsc, never a minifier that renames classes.
-        type: payload.constructor.name,
-        content: JSON.stringify(payload),
-        occurredOn: payload.occurredOn,
+        // The wire name comes from the class, so a minifier renaming classes would rename
+        // every event. The build is plain tsc — keep it that way.
+        type: event.constructor.name,
+        content: JSON.stringify(event),
+        occurredOn: event.occurredOn,
       })),
     });
   }

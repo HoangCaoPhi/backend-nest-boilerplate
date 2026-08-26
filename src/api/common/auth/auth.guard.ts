@@ -1,10 +1,9 @@
-import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
-import { ConfigType } from '@nestjs/config';
+import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { IntegrationAuthenticator } from './integration-authenticator';
 import { INTEGRATION_CALLER } from './integration.decorator';
-import jwtConfig from './jwt.config';
+import { JwtConfig } from './jwt.config';
 import { IS_PUBLIC } from './public.decorator';
 
 // Single global guard, three endpoint categories: public, integration (HMAC), app (JWT).
@@ -15,8 +14,7 @@ export class AuthGuard implements CanActivate {
     private readonly reflector: Reflector,
     private readonly jwtService: JwtService,
     private readonly integrationAuthenticator: IntegrationAuthenticator,
-    @Inject(jwtConfig.KEY)
-    private readonly config: ConfigType<typeof jwtConfig>,
+    private readonly config: JwtConfig,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {

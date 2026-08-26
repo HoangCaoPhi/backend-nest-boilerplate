@@ -8,15 +8,15 @@ export abstract class AggregateRoot<TId> extends Entity<TId> {
     this._domainEvents.push(event);
   }
 
-  // Read without draining, so a caller whose transaction rolls back can retry
-  // with the same instance and still have its events.
-  get domainEvents(): ReadonlyArray<DomainEvent> {
-    return this._domainEvents;
+  get hasUncommittedEvents(): boolean {
+    return this._domainEvents.length > 0;
   }
 
-  pullDomainEvents(): DomainEvent[] {
-    const events = [...this._domainEvents];
+  getUncommittedEvents(): DomainEvent[] {
+    return [...this._domainEvents];
+  }
+
+  clearUncommittedEvents(): void {
     this._domainEvents.length = 0;
-    return events;
   }
 }
