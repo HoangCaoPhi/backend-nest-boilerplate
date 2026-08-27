@@ -9,7 +9,7 @@
     "build": "tsc -b && tsc-alias -p tsconfig.base.json",
     "start": "node dist/api/main.js",
     "dev": "tsc -b --watch",
-    "test": "jest",
+    "test": "jest --runInBand",
     "test:db": "node scripts/setup-test-db.mjs",
     "test:unit": "jest --selectProjects unit",
     "test:integration": "jest --selectProjects integration --runInBand",

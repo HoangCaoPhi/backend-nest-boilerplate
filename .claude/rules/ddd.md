@@ -63,13 +63,31 @@ paths:
 
 ## Domain event
 
-- Never write to the DB from an `@EventsHandler` — it runs outside the caller's transaction.
-  Anything that must not be lost goes through the outbox; `EventBus` is best-effort only.
-- The outbox's on-the-wire `type` comes from `event.constructor.name` — a bundler/minifier that
-  renames classes silently renames every exchange.
+- Handlers are `@DomainEventHandler(TheEvent)`, dispatched awaited and sequential by
+  `DomainEventDispatcher` inside the command's transaction. A handler may write — through a
+  repository or the outbox — and that write commits with the command; a handler that throws rolls
+  the whole command back.
+- Never use `@EventsHandler`/`EventBus` from `@nestjs/cqrs` for a domain event: it is
+  fire-and-forget and runs outside the transaction, so a failure there loses the work silently.
+- A handler must not mutate the aggregate that raised the event — it has already been written by
+  then, and `AggregateRepositoryBase` throws rather than let that change go missing.
+- Anything leaving this service goes through the outbox, never a direct call from a domain event
+  handler — the command's transaction cannot roll back an HTTP request that already went out.
 - Handlers live in the Application layer, never in Domain.
 - One event → zero or more handlers. With two or more, name each after the action it performs, not
   after the event: `<action>-when-<event>.domain-event-handler.ts`.
+
+## Integration event
+
+- The outbox is drained after commit by `OutboxProcessor`, which routes each row to the
+  `@OutboxEventHandler(Name)` providers registered for it. A type with no handler throws, so the
+  row stays pending instead of being marked processed with nothing done.
+- The routing key is `event.constructor.name`, taken at enqueue time — a bundler/minifier that
+  renames classes silently breaks every route. The build is plain `tsc`; keep it that way.
+- A handler runs in its own transaction, one message at a time, and is retried with backoff — so
+  it must be idempotent, not just correct on the first run.
+- Name them after the action: `<action>-when-<event>.outbox-event-handler.ts`, next to the
+  integration event they consume.
 
 ## Repository — one per aggregate root
 
@@ -78,7 +96,10 @@ paths:
   `I<Aggregate>Repository`, mutates it through its own methods, and never commits itself.
 - A repository implementation supplies only the persistence-specific reads/writes for its own
   aggregate; it never opens or commits a transaction itself, and never skips a step in the
-  surrounding transaction/outbox/publish chain — that chain is fixed once, centrally
-  (`AggregateRepositoryBase`), not re-implemented per repository. Transaction scope is per
-  aggregate — never widen a repository to touch more than the one aggregate it owns.
+  surrounding write/dispatch chain — that chain is fixed once, centrally
+  (`AggregateRepositoryBase`), not re-implemented per repository. Never widen a repository to
+  touch more than the one aggregate it owns.
+- Transaction scope is the command, not the repository: `COMMAND_DISPATCHER` opens one
+  transaction around the whole command and every repository write joins it. A repository called
+  with no transaction open refuses — that is the guard, not a fallback.
 - Queries bypass repositories entirely — reads go through a read port (CQRS), never a repository.
