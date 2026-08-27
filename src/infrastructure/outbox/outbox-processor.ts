@@ -4,8 +4,7 @@ import { TransactionHost } from '@nestjs-cls/transactional';
 import { TimeProvider } from '@shared-kernel/time-provider/time-provider.interface';
 import { TIME_PROVIDER } from '@shared-kernel/time-provider/time-provider.di-tokens';
 import { PrismaAdapter } from '../persistence/prisma/aggregate-repository.base';
-import { IntegrationEventPublisher } from '../integration-event/integration-event-publisher.interface';
-import { INTEGRATION_EVENT_PUBLISHER } from '../integration-event/integration-event.di-tokens';
+import { OutboxEventDispatcher } from '@application/common/outbox/outbox-event-dispatcher';
 
 const BATCH_SIZE = 20;
 const MAX_ATTEMPTS = 8;
@@ -25,8 +24,7 @@ export class OutboxProcessor {
 
   constructor(
     private readonly txHost: TransactionHost<PrismaAdapter>,
-    @Inject(INTEGRATION_EVENT_PUBLISHER)
-    private readonly publisher: IntegrationEventPublisher,
+    private readonly dispatcher: OutboxEventDispatcher,
     @Inject(TIME_PROVIDER)
     private readonly timeProvider: TimeProvider,
   ) {}
@@ -55,7 +53,7 @@ export class OutboxProcessor {
       }
 
       try {
-        await this.publisher.publish(message.type, message.content);
+        await this.dispatcher.dispatch(message.type, message.content);
         await this.txHost.tx.outboxMessage.update({
           where: { id: message.id },
           data: { attempts: message.attempts + 1, processedOn: this.timeProvider.now(), error: null },

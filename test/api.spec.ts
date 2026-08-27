@@ -4,11 +4,9 @@ import { JwtService } from '@nestjs/jwt';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { AppModule } from '@api/app.module';
-import { IntegrationEventPublisher } from '@infrastructure/integration-event/integration-event-publisher.interface';
-import {
-  INTEGRATION_EVENT_PUBLISHER,
-  RABBITMQ_CONNECTION,
-} from '@infrastructure/integration-event/integration-event.di-tokens';
+import { IntegrationEventPublisher } from '@application/common/integration-event/integration-event-publisher.interface';
+import { INTEGRATION_EVENT_PUBLISHER } from '@application/common/integration-event/integration-event.di-tokens';
+import { RABBITMQ_CONNECTION } from '@infrastructure/event-bus/event-bus.di-tokens';
 import { PrismaClientExtended } from '@infrastructure/persistence/prisma/prisma-client.factory';
 import { PRISMA_CLIENT } from '@infrastructure/persistence/prisma/prisma.di-tokens';
 

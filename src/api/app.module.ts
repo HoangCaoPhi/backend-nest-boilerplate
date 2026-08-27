@@ -4,6 +4,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ClsModule } from 'nestjs-cls';
 import { ClsPluginTransactional } from '@nestjs-cls/transactional';
 import { TransactionalAdapterPrisma } from '@nestjs-cls/transactional-adapter-prisma';
+import { ApplicationModule } from '@application/application.module';
 import { InfrastructureModule } from '@infrastructure/infrastructure.module';
 import { PrismaModule } from '@infrastructure/persistence/prisma/prisma.module';
 import { PrismaClientExtended } from '@infrastructure/persistence/prisma/prisma-client.factory';
@@ -22,6 +23,7 @@ import { PublicModule } from './endpoints/public/public.module';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    ApplicationModule,
     InfrastructureModule,
     PrismaModule,
     OutboxModule,

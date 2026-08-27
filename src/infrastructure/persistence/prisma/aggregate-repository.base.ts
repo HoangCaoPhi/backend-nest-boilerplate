@@ -3,7 +3,7 @@ import { Transaction, TransactionHost } from '@nestjs-cls/transactional';
 import { TransactionalAdapterPrisma } from '@nestjs-cls/transactional-adapter-prisma';
 import { AggregateRoot } from '@domain/common/aggregate-root.base';
 import { Repository } from '@domain/common/repository.interface';
-import { DomainEventDispatcher } from '../../domain-event/domain-event-dispatcher';
+import { DomainEventDispatcher } from '@application/common/domain-event/domain-event-dispatcher';
 import { PrismaClientExtended } from './prisma-client.factory';
 
 export type PrismaAdapter = TransactionalAdapterPrisma<PrismaClientExtended>;
@@ -39,20 +39,27 @@ export abstract class AggregateRepositoryBase<T extends AggregateRoot<unknown>> 
     await this.commit(aggregate, (db) => this.remove(db, aggregate));
   }
 
+  // Joins the transaction the command dispatcher opened; it never opens one, so a write
+  // that gets here unscoped would otherwise land on the non-transactional client.
   private async commit(aggregate: T, write: (db: PrismaContext) => Promise<void>): Promise<void> {
-    await this.txHost.withTransaction(async () => {
-      await write(this.txHost.tx);
+    if (!this.txHost.isTransactionActive()) {
+      throw new Error(
+        `${aggregate.constructor.name} ${String(aggregate.id)} was written with no transaction open — ` +
+          'send the command through COMMAND_DISPATCHER.',
+      );
+    }
 
-      const events = aggregate.getUncommittedEvents();
-      aggregate.clearUncommittedEvents();
-      await this.dispatcher.dispatch(events);
+    await write(this.txHost.tx);
 
-      if (aggregate.hasUncommittedEvents) {
-        throw new Error(
-          `A handler mutated ${aggregate.constructor.name} ${String(aggregate.id)} after it had been written, ` +
-            'so that change was never persisted.',
-        );
-      }
-    });
+    const events = aggregate.getUncommittedEvents();
+    aggregate.clearUncommittedEvents();
+    await this.dispatcher.dispatch(events);
+
+    if (aggregate.hasUncommittedEvents) {
+      throw new Error(
+        `A handler mutated ${aggregate.constructor.name} ${String(aggregate.id)} after it had been written, ` +
+          'so that change was never persisted.',
+      );
+    }
   }
 }

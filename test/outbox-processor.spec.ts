@@ -1,28 +1,33 @@
+import { Injectable } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { DiscoveryModule } from '@nestjs/core';
 import { Test, TestingModule } from '@nestjs/testing';
 import { ClsModule } from 'nestjs-cls';
 import { ClsPluginTransactional } from '@nestjs-cls/transactional';
 import { TransactionalAdapterPrisma } from '@nestjs-cls/transactional-adapter-prisma';
 import { SharedKernelModule } from '@shared-kernel/shared-kernel.module';
-import { IntegrationEventPublisher } from '@infrastructure/integration-event/integration-event-publisher.interface';
-import { INTEGRATION_EVENT_PUBLISHER } from '@infrastructure/integration-event/integration-event.di-tokens';
+import { OutboxEventDispatcher } from '@application/common/outbox/outbox-event-dispatcher';
+import { OutboxEventHandler } from '@application/common/outbox/outbox-event-handler';
+import { TodoItemCompletedIntegrationEvent } from '@application/todo-lists/integration-events/todo-item-completed.integration-event';
 import { OutboxProcessor } from '@infrastructure/outbox/outbox-processor';
 import { InfrastructureModule } from '@infrastructure/infrastructure.module';
 import { PrismaClientExtended } from '@infrastructure/persistence/prisma/prisma-client.factory';
 import { PrismaModule } from '@infrastructure/persistence/prisma/prisma.module';
 import { PRISMA_CLIENT } from '@infrastructure/persistence/prisma/prisma.di-tokens';
 
-class FakePublisher implements IntegrationEventPublisher {
-  readonly published: { eventType: string; content: string }[] = [];
+@Injectable()
+@OutboxEventHandler(TodoItemCompletedIntegrationEvent.name)
+class FakeHandler implements OutboxEventHandler<TodoItemCompletedIntegrationEvent> {
+  readonly handled: TodoItemCompletedIntegrationEvent[] = [];
   failWith: Error | null = null;
-  beforePublish: (() => Promise<void>) | null = null;
+  beforeHandle: (() => Promise<void>) | null = null;
 
-  async publish(eventType: string, content: string): Promise<void> {
-    await this.beforePublish?.();
+  async handle(event: TodoItemCompletedIntegrationEvent): Promise<void> {
+    await this.beforeHandle?.();
     if (this.failWith) {
       throw this.failWith;
     }
-    this.published.push({ eventType, content });
+    this.handled.push(event);
   }
 }
 
@@ -36,7 +41,7 @@ describe('OutboxProcessor', () => {
   let moduleRef: TestingModule;
   let processor: OutboxProcessor;
   let prisma: PrismaClientExtended;
-  const publisher = new FakePublisher();
+  let handler: FakeHandler;
 
   const seed = (id: string, overrides: Record<string, unknown> = {}) =>
     prisma.outboxMessage.create({
@@ -56,6 +61,7 @@ describe('OutboxProcessor', () => {
         InfrastructureModule,
         SharedKernelModule,
         PrismaModule,
+        DiscoveryModule,
         ClsModule.forRoot({
           global: true,
           plugins: [
@@ -68,18 +74,19 @@ describe('OutboxProcessor', () => {
           ],
         }),
       ],
-      providers: [OutboxProcessor, { provide: INTEGRATION_EVENT_PUBLISHER, useValue: publisher }],
+      providers: [OutboxProcessor, OutboxEventDispatcher, FakeHandler],
     }).compile();
     await moduleRef.init();
 
     processor = moduleRef.get(OutboxProcessor);
+    handler = moduleRef.get(FakeHandler);
     prisma = moduleRef.get<PrismaClientExtended>(PRISMA_CLIENT);
   });
 
   beforeEach(async () => {
-    publisher.published.length = 0;
-    publisher.failWith = null;
-    publisher.beforePublish = null;
+    handler.handled.length = 0;
+    handler.failWith = null;
+    handler.beforeHandle = null;
     await prisma.outboxMessage.deleteMany();
   });
 
@@ -93,9 +100,7 @@ describe('OutboxProcessor', () => {
 
     await processor.process();
 
-    expect(publisher.published).toEqual([
-      { eventType: 'TodoItemCompletedIntegrationEvent', content: JSON.stringify({ todoItemId: 'ob-1' }) },
-    ]);
+    expect(handler.handled).toEqual([{ todoItemId: 'ob-1' }]);
     const [row] = await prisma.outboxMessage.findMany();
     expect(row.processedOn).not.toBeNull();
     expect(row.error).toBeNull();
@@ -107,10 +112,7 @@ describe('OutboxProcessor', () => {
 
     await processor.process();
 
-    expect(publisher.published.map((message) => JSON.parse(message.content).todoItemId)).toEqual([
-      'ob-early',
-      'ob-late',
-    ]);
+    expect(handler.handled.map((event) => event.todoItemId)).toEqual(['ob-early', 'ob-late']);
   });
 
   it('leaves an already processed message alone', async () => {
@@ -118,13 +120,13 @@ describe('OutboxProcessor', () => {
 
     await processor.process();
 
-    expect(publisher.published).toHaveLength(0);
+    expect(handler.handled).toHaveLength(0);
   });
 
   describe('when publishing fails', () => {
     it('records the reason and keeps the message pending', async () => {
       await seed('ob-fail');
-      publisher.failWith = new Error('broker unreachable');
+      handler.failWith = new Error('broker unreachable');
 
       await processor.process();
 
@@ -135,7 +137,7 @@ describe('OutboxProcessor', () => {
 
     it('counts the attempt and pushes the next one into the future', async () => {
       await seed('ob-fail');
-      publisher.failWith = new Error('broker unreachable');
+      handler.failWith = new Error('broker unreachable');
 
       await processor.process();
 
@@ -146,7 +148,7 @@ describe('OutboxProcessor', () => {
 
     it('does not throw out of the cycle, so the timer survives', async () => {
       await seed('ob-fail');
-      publisher.failWith = new Error('broker unreachable');
+      handler.failWith = new Error('broker unreachable');
 
       await expect(processor.process()).resolves.toBeUndefined();
     });
@@ -156,7 +158,7 @@ describe('OutboxProcessor', () => {
 
       await processor.process();
 
-      expect(publisher.published).toHaveLength(1);
+      expect(handler.handled).toHaveLength(1);
       const [row] = await prisma.outboxMessage.findMany();
       expect(row.processedOn).not.toBeNull();
     });
@@ -167,7 +169,7 @@ describe('OutboxProcessor', () => {
 
     await processor.process();
 
-    expect(publisher.published).toHaveLength(0);
+    expect(handler.handled).toHaveLength(0);
   });
 
   // Past the attempt ceiling a message stops being selected and stays as a dead letter.
@@ -176,7 +178,7 @@ describe('OutboxProcessor', () => {
 
     await processor.process();
 
-    expect(publisher.published).toHaveLength(0);
+    expect(handler.handled).toHaveLength(0);
     const [row] = await prisma.outboxMessage.findMany();
     expect(row.attempts).toBe(8);
     expect(row.processedOn).toBeNull();
@@ -189,7 +191,7 @@ describe('OutboxProcessor', () => {
     await seed('ob-inflight');
     const started = deferred();
     const blocked = deferred();
-    publisher.beforePublish = async () => {
+    handler.beforeHandle = async () => {
       started.resolve();
       await blocked.promise;
     };
@@ -202,6 +204,6 @@ describe('OutboxProcessor', () => {
     blocked.resolve();
     await firstCycle;
 
-    expect(publisher.published).toHaveLength(1);
+    expect(handler.handled).toHaveLength(1);
   });
 });

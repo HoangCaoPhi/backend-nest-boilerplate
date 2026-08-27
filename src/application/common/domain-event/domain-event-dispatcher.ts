@@ -2,7 +2,7 @@ import { Injectable, OnModuleInit, Type } from '@nestjs/common';
 import { DiscoveryService } from '@nestjs/core';
 import { ClsService } from 'nestjs-cls';
 import { DomainEvent } from '@domain/common/domain-event.interface';
-import { DomainEventHandler } from '@application/common/domain-event/domain-event-handler';
+import { DomainEventHandler } from './domain-event-handler';
 
 const DEPTH_KEY = 'domainEventDepth';
 const MAX_DEPTH = 5;

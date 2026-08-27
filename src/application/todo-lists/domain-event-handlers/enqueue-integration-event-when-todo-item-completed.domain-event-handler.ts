@@ -7,7 +7,7 @@ import { TodoItemCompletedIntegrationEvent } from '../integration-events/todo-it
 
 @Injectable()
 @DomainEventHandler(TodoItemCompletedDomainEvent)
-export class PublishIntegrationEventWhenTodoItemCompleted implements DomainEventHandler<TodoItemCompletedDomainEvent> {
+export class EnqueueIntegrationEventWhenTodoItemCompletedDomainEventHandler implements DomainEventHandler<TodoItemCompletedDomainEvent> {
   constructor(
     @Inject(INTEGRATION_EVENT_OUTBOX)
     private readonly outbox: IntegrationEventOutbox,

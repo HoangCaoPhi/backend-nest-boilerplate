@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfirmChannel, RecoveringChannelModel } from 'amqplib';
-import { IntegrationEventPublisher } from './integration-event-publisher.interface';
-import { RABBITMQ_CONNECTION } from './integration-event.di-tokens';
+import { IntegrationEventPublisher } from '@application/common/integration-event/integration-event-publisher.interface';
+import { RABBITMQ_CONNECTION } from './event-bus.di-tokens';
 
 @Injectable()
 export class RabbitMqIntegrationEventPublisher implements IntegrationEventPublisher {
